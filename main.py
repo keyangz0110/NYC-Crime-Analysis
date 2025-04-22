@@ -3,8 +3,6 @@ import pandas as pd
 import plotly.express as px
 import pydeck as pdk
 
-#branch
-
 # Load data
 df_monthly = pd.read_csv("data/arrest_monthly.csv", names=["month", "arrest_count"], header=None)
 df_daily = pd.read_csv("data/arrest_daily.csv", names=["day", "arrest_count"], header=None)
