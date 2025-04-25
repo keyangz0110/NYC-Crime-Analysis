@@ -3,8 +3,6 @@ import pandas as pd
 import plotly.express as px
 import pydeck as pdk
 
-#branch
-
 # Load data
 df_monthly = pd.read_csv("data/arrest_monthly.csv", names=["month", "arrest_count"], header=None)
 df_daily = pd.read_csv("data/arrest_daily.csv", names=["day", "arrest_count"], header=None)
@@ -57,8 +55,13 @@ st.title("🚔 NYC Arrests Interactive Dashboard")
 # Sidebar filters
 with st.sidebar:
     st.header("🔍 Filters")
-    selected_boro = st.selectbox("Select Borough", options=["ALL"] + sorted(df_map['ARREST_BORO'].dropna().unique().tolist()))
-    selected_sex = st.selectbox("Select Gender", options=["ALL"] + sorted(df_map['PERP_SEX'].dropna().unique().tolist()))
+    # 可选项：全称 + ALL
+    boro_options = ["ALL"] + [boro_map[b] for b in sorted(df_map['ARREST_BORO'].dropna().unique())]
+    selected_boro_name = st.selectbox("Select Borough", options=boro_options)
+
+    sex_options = ["ALL"] + [sex_map[s] for s in sorted(df_map['PERP_SEX'].dropna().unique())]
+    selected_sex_name = st.selectbox("Select Gender", options=sex_options)
+
     # 时间筛选器（Streamlit slider）
     date_range = st.slider(
         "Select Date Range",
@@ -74,17 +77,21 @@ with st.sidebar:
         (df_map['ARREST_DATE'] <= date_range[1])
         ]
 
-    #date_range = st.slider("Select Date Range", min_value=pd.to_datetime(df_map['ARREST_DATE']).min(),
-     #                      max_value=pd.to_datetime(df_map['ARREST_DATE']).max(),
-      #                     value=(pd.to_datetime(df_map['ARREST_DATE']).min(), pd.to_datetime(df_map['ARREST_DATE']).max()))
-
 # Apply filters to map data
 map_data = df_map.copy()
 map_data['ARREST_DATE'] = pd.to_datetime(map_data['ARREST_DATE'])
 map_data = map_data[(map_data['ARREST_DATE'] >= date_range[0]) & (map_data['ARREST_DATE'] <= date_range[1])]
-if selected_boro != "ALL":
+
+# 如果选择了具体 Borough，就找到它的缩写
+if selected_boro_name != "ALL":
+    reverse_boro_map = {v: k for k, v in boro_map.items()}
+    selected_boro = reverse_boro_map[selected_boro_name]
     map_data = map_data[map_data['ARREST_BORO'] == selected_boro]
-if selected_sex != "ALL":
+
+
+if selected_sex_name != "ALL":
+    reverse_sex_map = {v: k for k, v in sex_map.items()}
+    selected_sex = reverse_sex_map[selected_sex_name]
     map_data = map_data[map_data['PERP_SEX'] == selected_sex]
 
 # Tabs
@@ -126,6 +133,45 @@ with tabs[2]:
     st.plotly_chart(fig3, use_container_width=True)
 
 with tabs[3]:
+    st.subheader("Borough Arrest Distribution (Choropleth)")
+
+    geo_boro_map = {
+        "K": "Brooklyn",
+        "B": "Bronx",
+        "M": "Manhattan",
+        "Q": "Queens",
+        "S": "Staten Island"
+    }
+
+    df_choro = df_map[df_map['ARREST_BORO'].isin(geo_boro_map.keys())].copy()
+    df_choro['ARREST_BORO'] = df_choro['ARREST_BORO'].map(geo_boro_map)
+    df_borough_total = df_choro.groupby("ARREST_BORO").size().reset_index(name="arrest_count")
+
+    import requests
+
+    boroughs_geojson = requests.get("https://raw.githubusercontent.com/dwillis/nyc-maps/master/boroughs.geojson").json()
+
+    # ✅ 确保 featureidkey 正确，颜色显示，宽高设置
+    fig_choro = px.choropleth_mapbox(
+        df_borough_total,
+        geojson=boroughs_geojson,
+        locations="ARREST_BORO",
+        featureidkey="properties.BoroName",
+        color="arrest_count",
+        color_continuous_scale="OrRd",  # 也可以换成 "Viridis"、"Blues" 等
+        mapbox_style="carto-positron",
+        center={"lat": 40.7128, "lon": -74.0060},
+        zoom=9,
+        opacity=0.6
+    )
+
+    fig_choro.update_layout(
+        margin={"r": 0, "t": 0, "l": 0, "b": 0},
+        height=600
+    )
+
+    st.plotly_chart(fig_choro, use_container_width=True)
+
     st.subheader("Hexagon Heatmap")
     st.pydeck_chart(pdk.Deck(
         map_style='mapbox://styles/mapbox/light-v9',
@@ -161,9 +207,46 @@ with tabs[3]:
     )
     st.plotly_chart(fig_map, use_container_width=True)  # ✅ 聚类图也撑满
 
-
 with tabs[4]:
     st.subheader("Top Offenses by Arrest Count")
     fig_top = px.bar(df_top.sort_values(by="arrest_count", ascending=False),
                      x="offense", y="arrest_count")
     st.plotly_chart(fig_top, use_container_width=True)
+
+    # offense × borough 聚合
+    top_offenses = df_map["OFNS_DESC"].value_counts().head(10).index
+    df_heat = df_map[df_map["OFNS_DESC"].isin(top_offenses)]
+
+    heat_df = df_heat.groupby(["OFNS_DESC", "ARREST_BORO"]).size().reset_index(name="count")
+    heat_pivot = heat_df.pivot(index="OFNS_DESC", columns="ARREST_BORO", values="count").fillna(0)
+
+    # 更好看的 Borough 名称映射
+    boro_name_map = {
+        "B": "Bronx",
+        "K": "Brooklyn",
+        "M": "Manhattan",
+        "Q": "Queens",
+        "S": "Staten Island"
+    }
+    heat_pivot.columns = [boro_name_map.get(b, b) for b in heat_pivot.columns]
+
+    # 绘制热力图
+    fig_heat = px.imshow(
+        heat_pivot,
+        text_auto=True,
+        color_continuous_scale="Blues",
+        labels=dict(x="Borough", y="Offense", color="Arrests"),
+        title="Top Offenses Across Boroughs"
+    )
+
+    fig_heat.update_layout(
+        height=600,
+        margin={"r": 0, "t": 50, "l": 50, "b": 0},
+        xaxis=dict(tickangle=0),
+    )
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+
+
+
+
