@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import pydeck as pdk
+import pickle
+import plotly.graph_objects as go
 
 # Load data
 df_monthly = pd.read_csv("data/arrest_monthly.csv", names=["month", "arrest_count"], header=None)
@@ -246,7 +248,153 @@ with tabs[4]:
     )
     st.plotly_chart(fig_heat, use_container_width=True)
 
+# Predictions Tab
+with tabs[5]:
+    st.subheader("Arrest Forecast")
+    
+    # Load the pre-trained model
+    try:
+        with open('arrest_forecast_model.pkl', 'rb') as f:
+            model = pickle.load(f)
+            
+        # UI controls for forecast
+        forecast_days = st.slider("Forecast Days", min_value=7, max_value=360, value=30)
+        
+        # Make prediction
+        forecast = model.predict(model.make_future_dataframe(periods=forecast_days))
+        
+        # Get historical data
+        # This is the key fix - We need to merge historical data from the model
+        historical_data = model.history
+        
+        # Get the date where historical data ends and forecast begins
+        last_historical_date = historical_data['ds'].max()
 
+        # Plot forecast
+        fig = go.Figure()
 
+        # Historical data points
+        fig.add_trace(go.Scatter(
+            x=historical_data['ds'],
+            y=historical_data['y'],
+            mode='markers',
+            name='Historical Data Points',
+            marker=dict(color='blue', size=4)
+        ))
 
+        # Historical trend line (red)
+        fig.add_trace(go.Scatter(
+            x=forecast['ds'][forecast['ds'] <= last_historical_date],
+            y=forecast['yhat'][forecast['ds'] <= last_historical_date],
+            mode='lines',
+            name='Historical Trend',
+            line=dict(color='red')
+        ))
 
+        # Future prediction line (purple)
+        fig.add_trace(go.Scatter(
+            x=forecast['ds'][forecast['ds'] > last_historical_date],
+            y=forecast['yhat'][forecast['ds'] > last_historical_date],
+            mode='lines',
+            name='Forecast',
+            line=dict(color='purple')
+        ))
+
+        # Uncertainty intervals
+        fig.add_trace(go.Scatter(
+            x=pd.concat([forecast['ds'][forecast['ds'] > last_historical_date], 
+                         forecast['ds'][forecast['ds'] > last_historical_date].iloc[::-1]]),
+            y=pd.concat([forecast['yhat_upper'][forecast['ds'] > last_historical_date], 
+                         forecast['yhat_lower'][forecast['ds'] > last_historical_date].iloc[::-1]]),
+            fill='toself',
+            fillcolor='rgba(128,0,128,0.2)',
+            line=dict(color='rgba(255,255,255,0)'),
+            name='Uncertainty Interval'
+        ))
+
+        fig.update_layout(
+            title='Arrest Volume Forecast',
+            xaxis_title='Date',
+            yaxis_title='Number of Arrests',
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Display forecast components
+        if st.checkbox("Show Forecast Components"):
+            st.subheader("Seasonal Components")
+            
+            # Create custom component plots instead of using model.plot_components()
+            # Weekly component
+            weekly_fig = go.Figure()
+            days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            
+            # Extract weekly components
+            weekly_effect = forecast['weekly'].tail(7).values
+            
+            weekly_fig.add_trace(go.Bar(
+                x=days,
+                y=weekly_effect,
+                marker_color='lightblue'
+            ))
+            weekly_fig.update_layout(
+                title='Weekly Pattern',
+                xaxis_title='Day of Week',
+                yaxis_title='Effect on Arrests'
+            )
+            
+            # Yearly component
+            yearly_fig = go.Figure()
+            
+            # Sort yearly components by date within a year to show Jan-Dec
+            yearly_df = forecast[['ds', 'yearly']].copy()
+            yearly_df['month'] = yearly_df['ds'].dt.month
+            yearly_df['day'] = yearly_df['ds'].dt.day
+            yearly_df = yearly_df.sort_values(['month', 'day']).drop_duplicates(['month', 'day'])
+            yearly_df = yearly_df.iloc[:365]  # Just use one year's worth
+            
+            # Format x-axis labels to show month names
+            yearly_df['date_label'] = yearly_df['ds'].dt.strftime('%b')
+            
+            yearly_fig.add_trace(go.Scatter(
+                x=yearly_df['ds'],
+                y=yearly_df['yearly'],
+                mode='lines',
+                line=dict(color='green', width=2)
+            ))
+            yearly_fig.update_layout(
+                title='Yearly Pattern',
+                xaxis_title='Month',
+                yaxis_title='Effect on Arrests',
+                xaxis=dict(
+                    tickformat='%b',
+                    tickmode='array',
+                    tickvals=pd.to_datetime([f'2023-{m:02d}-01' for m in range(1, 13)])
+                )
+            )
+            
+            # Display the custom component plots
+            col1, col2 = st.columns(2)
+            with col1:
+                st.plotly_chart(weekly_fig, use_container_width=True)
+            with col2:
+                st.plotly_chart(yearly_fig, use_container_width=True)
+        
+        # Feature importance
+        st.subheader("Insights")
+        st.write("The model identifies these seasonal patterns in arrest data:")
+        
+        # More accurate weekly pattern analysis
+        weekday_values = forecast['weekly'][forecast['ds'].dt.dayofweek < 5].mean()  # Mon-Fri (0-4)
+        weekend_values = forecast['weekly'][forecast['ds'].dt.dayofweek >= 5].mean()  # Sat-Sun (5-6)
+        peak_days = "weekends" if weekend_values > weekday_values else "weekdays"
+
+        st.write("1. **Weekly Pattern**: Arrests tend to peak on " + peak_days)
+        
+        st.write("2. **Yearly Pattern**: Highest arrest volumes typically occur in " + 
+                 ("summer months" if forecast['yearly'].iloc[180:270].mean() > forecast['yearly'].mean() else "winter months"))
+                
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        st.info("Please train the model first by running 'train_model.py'")
