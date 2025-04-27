@@ -4,6 +4,7 @@ import plotly.express as px
 import pydeck as pdk
 import pickle
 import plotly.graph_objects as go
+from crime_classifier import predict_crime_types
 
 # Load data
 df_monthly = pd.read_csv("data/arrest_monthly.csv", names=["month", "arrest_count"], header=None)
@@ -97,7 +98,7 @@ if selected_sex_name != "ALL":
     map_data = map_data[map_data['PERP_SEX'] == selected_sex]
 
 # Tabs
-tabs = st.tabs(["📈 Trends", "👤 Demographics", "🧭 Borough Comparison", "🗺️ Maps", "🔝 Top Offenses", "🔮 Predictions"])
+tabs = st.tabs(["📈 Trends", "👤 Demographics", "🧭 Borough Comparison", "🗺️ Maps", "🔝 Top Offenses", "🔮 Arrest Forecast", "🔍 Crime Predictor"])
 
 with tabs[0]:
     st.subheader("Monthly Arrest Trends")
@@ -398,3 +399,306 @@ with tabs[5]:
     except Exception as e:
         st.error(f"Error loading model: {e}")
         st.info("Please train the model first by running 'train_model.py'")
+
+# Crime Predictor Tab
+with tabs[6]:
+    st.subheader("NYC Crime Type Prediction Map")
+    
+    try:
+        # Load the model
+        with open('crime_type_model.pkl', 'rb') as f:
+            crime_model_package = pickle.load(f)
+            
+        # Load neighborhood boundaries from local file
+        import json
+        try:
+            with open('2020_neighborhood_tabulation_areas.geojson', 'r') as f:
+                neighborhoods_geojson = json.load(f)
+            print("Successfully loaded local neighborhood geojson file")
+        except Exception as e:
+            st.error(f"Could not load local neighborhood boundaries: {e}")
+            
+        # Time controls (without requiring button press)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            selected_day_name = st.selectbox("Day of Week", options=days, key="pred_day")
+            selected_day = days.index(selected_day_name)
+        
+        with col2:
+            months = ["January", "February", "March", "April", "May", "June", 
+                     "July", "August", "September", "October", "November", "December"]
+            selected_month_name = st.selectbox("Month", options=months, key="pred_month")
+            selected_month = months.index(selected_month_name) + 1
+            
+        # Get list of neighborhoods from the encoder
+        neighborhood_names = crime_model_package['feature_encoders']['NEIGHBORHOOD'].classes_
+        
+        # Map tab with loading spinner
+        with st.spinner("Generating crime predictions for all NYC neighborhoods..."):
+            # Pre-compute predictions for all neighborhoods
+            neighborhood_predictions = {}
+            crime_type_colors = {}
+            color_idx = 0
+            color_palette = px.colors.qualitative.Bold
+            
+            # Prediction processor
+            for neighborhood in neighborhood_names:
+                predictions = predict_crime_types(
+                    neighborhood, 
+                    selected_day, 
+                    selected_month, 
+                    crime_model_package
+                )
+                
+                # Store top crime and probability
+                top_crime, top_prob = predictions[0]
+                neighborhood_predictions[neighborhood] = {
+                    'top_crime': top_crime,
+                    'probability': top_prob,
+                    'all_predictions': predictions
+                }
+                
+                # Assign colors to crime types
+                if top_crime not in crime_type_colors:
+                    crime_type_colors[top_crime] = color_palette[color_idx % len(color_palette)]
+                    color_idx += 1
+            
+            # Prepare data for choropleth
+            map_data = []
+            for neighborhood in neighborhood_names:
+                pred = neighborhood_predictions[neighborhood]
+                map_data.append({
+                    'neighborhood': neighborhood,
+                    'top_crime': pred['top_crime'],
+                    'probability': pred['probability']
+                })
+                
+            map_df = pd.DataFrame(map_data)
+            
+            # Create visualization tabs for different views
+            pred_view_tabs = st.tabs(["Crime Type Map", "Probability Heatmap", "Crime Distribution by Neighborhood"])
+            
+            with pred_view_tabs[0]:
+                st.subheader(f"Most Likely Crime Type by Neighborhood ({selected_day_name}, {selected_month_name})")
+                
+                # Create custom hover text
+                map_df['hover_text'] = map_df.apply(
+                    lambda x: f"<b>{x['neighborhood']}</b><br>" + 
+                             f"Most likely crime: {x['top_crime']}<br>" +
+                             f"Probability: {x['probability']:.1%}", 
+                    axis=1
+                )
+                
+                # Create categorical colors for crime types
+                fig = px.choropleth_mapbox(
+                    map_df,
+                    geojson=neighborhoods_geojson,
+                    locations='neighborhood',
+                    featureidkey="properties.ntaname",  # Adjust based on actual geojson structure
+                    color='top_crime',
+                    color_discrete_map=crime_type_colors,
+                    mapbox_style="carto-positron",
+                    zoom=9.5,
+                    center={"lat": 40.7128, "lon": -74.0060},
+                    opacity=0.7,
+                    hover_data={'neighborhood': False, 'top_crime': False, 'probability': False},
+                    custom_data=['hover_text']
+                )
+                
+                fig.update_traces(
+                    hovertemplate="%{customdata[0]}<extra></extra>"
+                )
+                
+                fig.update_layout(
+                    margin={"r": 0, "t": 0, "l": 0, "b": 0},
+                    height=600,
+                    legend_title="Crime Type"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Create a legend for crime types
+                st.subheader("Legend: Crime Types")
+                legend_cols = st.columns(3)
+                for i, (crime, color) in enumerate(crime_type_colors.items()):
+                    col_idx = i % 3
+                    legend_cols[col_idx].markdown(
+                        f"<div style='display:flex;align-items:center;'>" +
+                        f"<div style='background-color:{color};width:20px;height:20px;margin-right:5px;'></div>" +
+                        f"{crime}</div>", 
+                        unsafe_allow_html=True
+                    )
+            
+            with pred_view_tabs[1]:
+                st.subheader(f"Crime Probability Heatmap ({selected_day_name}, {selected_month_name})")
+                
+                # Create heatmap showing probability of the top crime type
+                if len(map_df) > 0:
+                    # Calculate min and max probabilities for dynamic scale
+                    min_prob = map_df['probability'].min()
+                    max_prob = map_df['probability'].max()
+                    
+                    # Ensure there's always some spread in the color scale
+                    # If range is too small, add some padding
+                    if max_prob - min_prob < 0.1:  # Less than 10% difference
+                        pad = (0.1 - (max_prob - min_prob)) / 2
+                        min_prob = max(0, min_prob - pad)
+                        max_prob = min(1.0, max_prob + pad)
+                    
+                    # Display the probability range being shown
+                    st.write(f"Probability range: {min_prob:.1%} to {max_prob:.1%}")
+                    
+                    fig2 = px.choropleth_mapbox(
+                        map_df,
+                        geojson=neighborhoods_geojson,
+                        locations='neighborhood',
+                        featureidkey="properties.ntaname",
+                        color='probability',
+                        color_continuous_scale="Viridis",
+                        range_color=[min_prob, max_prob],  # Dynamic scale based on actual data
+                        mapbox_style="carto-positron",
+                        zoom=9.5,
+                        center={"lat": 40.7128, "lon": -74.0060},
+                        opacity=0.7,
+                        hover_name='neighborhood',
+                        hover_data={
+                            'neighborhood': False,
+                            'top_crime': True,
+                            'probability': ':.1%'
+                        }
+                    )
+                    
+                    fig2.update_layout(
+                        margin={"r": 0, "t": 0, "l": 0, "b": 0},
+                        height=600,
+                        coloraxis_colorbar=dict(
+                            title="Probability",
+                            tickformat=".0%"
+                        )
+                    )
+                    
+                    st.plotly_chart(fig2, use_container_width=True)
+                    
+                    # Add a note about the visualization
+                    st.info("""
+                    This map shows the probability of the most likely crime type for each neighborhood. 
+                    Areas with higher probability (brighter colors) indicate more confident predictions.
+                    """)
+                else:
+                    st.error("No probability data available to display.")
+            
+            with pred_view_tabs[2]:
+                st.subheader(f"Crime Distribution by Neighborhood ({selected_day_name}, {selected_month_name})")
+                
+                # Check if we have predictions to work with
+                if len(neighborhood_predictions) == 0:
+                    st.error("No predictions available to display")
+                else:
+                    # Create a selector for the neighborhood
+                    neighborhoods_list = sorted(neighborhood_predictions.keys())
+                    
+                    # Let user select multiple neighborhoods in a dropdown
+                    selected_neighborhoods = st.multiselect(
+                        "Select Neighborhoods to Compare",
+                        options=neighborhoods_list,
+                        default=[neighborhoods_list[0]] if neighborhoods_list else [],
+                        max_selections=3  # Limit to 3 for readability
+                    )
+                    
+                    if not selected_neighborhoods:
+                        st.info("Please select at least one neighborhood to view crime distributions")
+                    else:
+                        # Create columns for the selected neighborhoods' pie charts
+                        columns = st.columns(len(selected_neighborhoods))
+                        
+                        # Create a pie chart for each selected neighborhood
+                        for i, neighborhood in enumerate(selected_neighborhoods):
+                            with columns[i]:
+                                # Get the prediction data for this neighborhood
+                                pred_data = neighborhood_predictions[neighborhood]
+                                all_predictions = pred_data['all_predictions']
+                                
+                                # Extract crime types and probabilities
+                                crime_types, probabilities = zip(*all_predictions)
+                                
+                                # Create the pie chart
+                                fig = go.Figure(data=[go.Pie(
+                                    labels=crime_types,
+                                    values=probabilities,
+                                    hole=.3,
+                                    textinfo='label+percent',
+                                    insidetextorientation='radial',
+                                    marker=dict(
+                                        colors=px.colors.qualitative.Safe
+                                    )
+                                )])
+                                
+                                fig.update_layout(
+                                    title=f"{neighborhood}",
+                                    height=400,
+                                    margin=dict(t=30, b=0, l=0, r=0)
+                                )
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Also display the raw data in a small table below the chart
+                                st.write("Crime Probabilities:")
+                                
+                                # Create a dataframe for display
+                                crime_df = pd.DataFrame({
+                                    'Crime Type': crime_types,
+                                    'Probability': [f"{p:.1%}" for p in probabilities]
+                                })
+                                
+                                st.dataframe(
+                                    crime_df.sort_values('Crime Type'),
+                                    hide_index=True,
+                                    use_container_width=True,
+                                    height=150
+                                )
+                        
+                        # Add a "View All" option if there are many neighborhoods
+                        if len(neighborhoods_list) > 5:
+                            if st.checkbox("Generate Overview of All Neighborhoods"):
+                                st.subheader("Crime Type Distribution Across All Neighborhoods")
+                                
+                                # Create aggregate data
+                                crime_counts = {}
+                                
+                                # Count neighborhoods where each crime is the most likely
+                                for neighborhood, pred in neighborhood_predictions.items():
+                                    top_crime = pred['top_crime']
+                                    if top_crime in crime_counts:
+                                        crime_counts[top_crime] += 1
+                                    else:
+                                        crime_counts[top_crime] = 1
+                                
+                                # Convert to dataframe for plotting
+                                crime_summary = pd.DataFrame({
+                                    'Crime Type': list(crime_counts.keys()),
+                                    'Number of Neighborhoods': list(crime_counts.values())
+                                }).sort_values('Number of Neighborhoods', ascending=False)
+                                
+                                # Create a summary bar chart
+                                fig = px.bar(
+                                    crime_summary,
+                                    x='Crime Type',
+                                    y='Number of Neighborhoods',
+                                    color='Crime Type',
+                                    title='Most Common Predicted Crime Types Across NYC Neighborhoods'
+                                )
+                                
+                                fig.update_layout(
+                                    xaxis_title="Crime Type",
+                                    yaxis_title="Number of Neighborhoods",
+                                    showlegend=False,
+                                    height=500
+                                )
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error generating crime prediction map: {e}")
+        st.info("Please train the crime type model first by running 'train_crime_classifier.py'")
