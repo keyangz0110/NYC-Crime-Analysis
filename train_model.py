@@ -8,7 +8,7 @@ import os
 print("Starting model training process...")
 
 # Path to the new merged data file
-data_file = 'data/merged_NYPD_arrests.csv'
+data_file = 'data/cleaned_data.csv'
 print(f"Loading data from {data_file}...")
 
 # Load your data - specify low_memory=False for large files
