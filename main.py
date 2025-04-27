@@ -42,7 +42,7 @@ df_boro_race["ARREST_BORO"] = df_boro_race["ARREST_BORO"].map(boro_map)
 
 df_map = pd.read_csv("data/cleaned_data.csv")
 # 正确解析 2025/1/2 格式
-df_map['ARREST_DATE'] = pd.to_datetime(df_map['ARREST_DATE'], format='%Y/%m/%d')
+df_map['ARREST_DATE'] = pd.to_datetime(df_map['ARREST_DATE'], format='%Y-%m-%d')
 
 # 将时间转换为 Python 原生 datetime 对象
 min_date = df_map['ARREST_DATE'].min().to_pydatetime()
@@ -171,7 +171,7 @@ with tabs[3]:
     )
 
     st.plotly_chart(fig_choro, use_container_width=True)
-
+    map_data_h = map_data[['Longitude', 'Latitude']]
     st.subheader("Hexagon Heatmap")
     st.pydeck_chart(pdk.Deck(
         map_style='mapbox://styles/mapbox/light-v9',
@@ -184,7 +184,7 @@ with tabs[3]:
         layers=[
             pdk.Layer(
                 "HexagonLayer",
-                data=map_data,
+                data=map_data_h,
                 get_position='[Longitude, Latitude]',
                 radius=200,
                 elevation_scale=4,
