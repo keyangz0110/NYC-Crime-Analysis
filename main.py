@@ -97,7 +97,7 @@ if selected_sex_name != "ALL":
     map_data = map_data[map_data['PERP_SEX'] == selected_sex]
 
 # Tabs
-tabs = st.tabs(["📈 Trends", "👤 Demographics", "🧭 Borough Comparison", "🗺️ Maps", "🔝 Top Offenses"])
+tabs = st.tabs(["📈 Trends", "👤 Demographics", "🧭 Borough Comparison", "🗺️ Maps", "🔝 Top Offenses", "🔮 Predictions"])
 
 with tabs[0]:
     st.subheader("Monthly Arrest Trends")
