@@ -19,8 +19,8 @@ def build_forecast_model(df):
         seasonality_mode='multiplicative'
     )
     
-    # Add holidays if needed
-    # model.add_country_holidays(country_name='US')
+    # Add US holidays for better forecasting
+    model.add_country_holidays(country_name='US')
     
     # Fit model
     model.fit(df_prophet)

@@ -3,6 +3,7 @@ import pickle
 from prophet import Prophet
 from model_utils import build_forecast_model
 import os
+from prophet.diagnostics import cross_validation, performance_metrics
 
 # Display some information about the process
 print("Starting model training process...")
@@ -35,14 +36,25 @@ daily_arrests.to_csv('data/arrest_daily.csv', index=False)
 print(f"Created daily aggregation with {len(daily_arrests)} rows")
 print(daily_arrests.head())
 
+# Prepare data for Prophet
+df_prophet = daily_arrests.rename(columns={'ARREST_DATE': 'ds', 'arrest_count': 'y'})
+
 # Train the model
 print("Training the forecasting model (this may take a few minutes)...")
 model = build_forecast_model(daily_arrests)
+
+# Perform cross-validation
+print("Evaluating model performance through cross-validation...")
+df_cv = cross_validation(model, initial='30 days', period='90 days', horizon='360 days')
+df_p = performance_metrics(df_cv)
+
+# Print performance metric
+print(f"Mean Absolute Percentage Error (MAPE): {df_p['mape'].mean():.2f}%")
 
 # Save the model
 model_file = 'arrest_forecast_model.pkl'
 with open(model_file, 'wb') as f:
     pickle.dump(model, f)
 
-print(f"Model trained and saved as '{model_file}'")
+print(f"\nModel trained and saved as '{model_file}'")
 print(f"File size: {os.path.getsize(model_file) / (1024*1024):.2f} MB")
