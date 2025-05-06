@@ -1,0 +1,105 @@
+CREATE EXTERNAL TABLE nypd_arrests_raw (
+  ARREST_KEY STRING,
+  ARREST_DATE STRING,
+  PD_CD STRING,
+  PD_DESC STRING,
+  KY_CD STRING,
+  OFNS_DESC STRING,
+  LAW_CODE STRING,
+  LAW_CAT_CD STRING,
+  ARREST_BORO STRING,
+  ARREST_PRECINCT INT,
+  JURISDICTION_CODE INT,
+  AGE_GROUP STRING,
+  PERP_SEX STRING,
+  PERP_RACE STRING,
+  X_COORD_CD STRING,
+  Y_COORD_CD STRING,
+  Latitude DOUBLE,
+  Longitude DOUBLE,
+  Georef STRING
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+WITH SERDEPROPERTIES (
+  "separatorChar" = ",",
+  "quoteChar"     = "\""
+)
+STORED AS TEXTFILE
+LOCATION '/user/haolin/nypd/';
+
+
+CREATE TABLE nypd_arrests_cleaned AS
+SELECT 
+  cast(from_unixtime(unix_timestamp(ARREST_DATE, 'MM/dd/yyyy')) as date) as arrest_date,
+  OFNS_DESC,
+  ARREST_BORO,
+  Latitude,
+  Longitude
+FROM nypd_arrests_raw
+WHERE Latitude IS NOT NULL AND Longitude IS NOT NULL AND ARREST_DATE IS NOT NULL;
+
+
+CREATE TABLE arrest_demographics_summary AS
+SELECT
+  PERP_SEX AS sex,
+  AGE_GROUP AS age_group,
+  PERP_RACE AS race,
+  COUNT(*) AS arrest_count
+FROM nypd_arrests_raw
+GROUP BY PERP_SEX, AGE_GROUP, PERP_RACE;
+
+
+CREATE TABLE arrest_top_offenses AS
+SELECT
+  OFNS_DESC AS offense,
+  COUNT(*) AS arrest_count
+FROM nypd_arrests_raw
+GROUP BY OFNS_DESC
+ORDER BY arrest_count DESC;
+
+
+CREATE TABLE arrest_monthly_summary AS
+SELECT 
+  date_format(CAST(from_unixtime(unix_timestamp(ARREST_DATE, 'yyyy/M/d')) AS DATE), 'yyyy-MM') AS month,
+  COUNT(*) AS arrest_count
+FROM nypd_arrests_raw
+WHERE ARREST_DATE IS NOT NULL
+GROUP BY date_format(CAST(from_unixtime(unix_timestamp(ARREST_DATE, 'yyyy/M/d')) AS DATE), 'yyyy-MM')
+ORDER BY month;
+
+
+CREATE TABLE arrest_daily_summary AS
+SELECT 
+  date_format(CAST(from_unixtime(unix_timestamp(ARREST_DATE, 'yyyy/M/d')) AS DATE), 'yyyy-MM-dd') AS day,
+  COUNT(*) AS arrest_count
+FROM nypd_arrests_raw
+WHERE ARREST_DATE IS NOT NULL
+GROUP BY date_format(CAST(from_unixtime(unix_timestamp(ARREST_DATE, 'yyyy/M/d')) AS DATE), 'yyyy-MM-dd')
+ORDER BY day;
+
+
+CREATE TABLE arrest_borough_gender_summary AS
+SELECT
+  ARREST_BORO AS borough,
+  PERP_SEX AS sex,
+  COUNT(*) AS arrest_count
+FROM nypd_arrests_raw
+GROUP BY ARREST_BORO, PERP_SEX;
+
+
+CREATE TABLE arrest_borough_age_summary AS
+SELECT
+  ARREST_BORO AS borough,
+  AGE_GROUP AS age_group,
+  COUNT(*) AS arrest_count
+FROM nypd_arrests_raw
+GROUP BY ARREST_BORO, AGE_GROUP;
+
+
+CREATE TABLE arrest_borough_race_summary AS
+SELECT
+  ARREST_BORO AS borough,
+  PERP_RACE AS race,
+  COUNT(*) AS arrest_count
+FROM nypd_arrests_raw
+GROUP BY ARREST_BORO, PERP_RACE;
