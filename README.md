@@ -54,33 +54,31 @@ This project seeks to analyze NYPD arrest data to:
 
 - Source Name: NYC OpenData
 - Link: [NYPD Arrest Data (Year to Date)](https://data.cityofnewyork.us/Public-Safety/NYPD-Arrest-Data-Year-to-Date-/uip8-fykc/about_data)
-- Size: 50MB
-- Number of Records: 261000
+- Size: 62MB
+- Number of Records: 331517
 
-## Proposed Technologies and Programming Language
+## Technologies and Programming Language
 
 ### Programming Language
 
 - Python: Main programming language for data processing, analysis, machine learning, and visualization.
-- SQL: For querying and managing crime data.
-- JavaScript: For web visualization.
+- Streamlit: For web visualization.
 
 ### Data Processing and Storage
 
-- Apache Spark: For large-scale data processing and trend analysis.
-- SQL: For efficient spatial data storage and retrieval.
+- HiveQL: For large-scale data processing and trend analysis.
 
 ### Geospatial Analysis and Mapping
 
-- Kepler.gl: For interactive map-based crime visualization.
+- Pydeck: For interactive map-based crime visualization.
 - LeafletJS: For mapping and clustering crime locations.
 
 ### Machine Learning and Statistical Analysis
 
 - scikit-learn: For clustering (K-Means) and predictive modeling.
-- LSTM (PyTorch): For time-series forecasting of crime trends.
+- Prophet: For time-series forecasting of crime trends.
+- CatBoostClassifier: For training categorical prediction model.
 
 ### Data Visualization and Dashboarding
 
-- Tableau / Power BI: For interactive data visualization.
-- Matplotlib / Seaborn: For statistical crime trend plots.
+- Plotly: For interactive data visualization.
